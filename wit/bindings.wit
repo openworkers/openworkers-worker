@@ -1,0 +1,110 @@
+// Braces because wit/ already holds openworkers:worker; a directory takes at
+// most one unbraced package
+package openworkers:bindings@0.1.0 {
+    /// SQL access, shaped after D1. A statement is prepared and its positional
+    /// parameters bound guest-side; the host is only called to run it.
+    interface database {
+        /// One bound value; maps onto the host's SqlPrimitive
+        variant sql-value {
+            null,
+            boolean(bool),
+            integer(s64),
+            float(f64),
+            text(string),
+        }
+
+        /// A positional parameter: a single value, or a list for the array
+        /// forms SQL accepts (`WHERE id = ANY($1)`)
+        variant sql-param {
+            value(sql-value),
+            values(list<sql-value>),
+        }
+
+        /// What the host reports about a statement it ran
+        record query-meta {
+            /// Rows written by a mutation, rows returned otherwise
+            rows-affected: u64,
+            /// Wall-clock duration of the host call
+            duration-ms: u64,
+        }
+
+        record query-result {
+            /// JSON array of row objects, column names as keys
+            rows: string,
+            meta: query-meta,
+        }
+
+        /// Run a statement and return its first row as a JSON object, or none
+        /// when it returned no rows
+        first: func(binding: string, sql: string, params: list<sql-param>) -> result<option<string>, string>;
+
+        /// Run a statement and return every row it produced
+        all: func(binding: string, sql: string, params: list<sql-param>) -> result<query-result, string>;
+
+        /// Run a statement and keep only its meta; D1's `exec` is this with no
+        /// parameters, so it needs no separate function
+        run: func(binding: string, sql: string, params: list<sql-param>) -> result<query-meta, string>;
+    }
+
+    /// Key-value store. Values are JSON documents, because that is what the
+    /// platform stores: a plain string has to be sent quoted.
+    interface kv {
+        /// Read a value; none when the key is absent
+        get: func(binding: string, key: string) -> result<option<string>, string>;
+
+        /// Write a value, expiring it after the given number of seconds
+        put: func(binding: string, key: string, value: string, expires-in-seconds: option<u64>) -> result<_, string>;
+
+        /// Remove a key; removing an absent key succeeds
+        delete: func(binding: string, key: string) -> result<_, string>;
+
+        /// List keys under a prefix, up to the platform default when limit is
+        /// none
+        list-keys: func(binding: string, prefix: option<string>, limit: option<u32>) -> result<list<string>, string>;
+    }
+
+    /// Object storage, shaped after R2: opaque byte bodies addressed by key.
+    interface storage {
+        /// Object metadata, as reported by head
+        record object-info {
+            size: u64,
+            etag: option<string>,
+        }
+
+        record listing {
+            keys: list<string>,
+            /// True when the store held more keys than the limit returned
+            truncated: bool,
+        }
+
+        /// Read an object body; none when the key is absent
+        get: func(binding: string, key: string) -> result<option<list<u8>>, string>;
+
+        /// Write an object, replacing any object already under that key
+        put: func(binding: string, key: string, body: list<u8>) -> result<_, string>;
+
+        /// Remove an object; removing an absent object succeeds
+        delete: func(binding: string, key: string) -> result<_, string>;
+
+        /// Read object metadata without its body. A missing object is an error
+        /// here, not none: the platform's head does not separate absence from
+        /// failure. Use `get` when the two have to be told apart.
+        head: func(binding: string, key: string) -> result<object-info, string>;
+
+        /// List keys under a prefix, up to the platform default when limit is
+        /// none
+        list-keys: func(binding: string, prefix: option<string>, limit: option<u32>) -> result<listing, string>;
+    }
+
+    /// Every binding the host provides, so guests and host state one list.
+    ///
+    /// Deliberately absent: send-email. The platform's operations handler has
+    /// no email operation, so a guest importing one could not be linked; SDKs
+    /// must fail at runtime instead. Environment variables are absent too,
+    /// they come from wasi:cli/environment.
+    world imports {
+        import database;
+        import kv;
+        import storage;
+    }
+}

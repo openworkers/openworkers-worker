@@ -1,0 +1,29 @@
+package openworkers:worker@0.2.0;
+
+/// Cron entry point; wasi:http/proxy has no equivalent for it
+interface scheduled {
+    /// Handle a scheduled event (unix timestamp in ms)
+    handle-scheduled: func(scheduled-time: u64);
+}
+
+/// Full OpenWorkers guest: the standard wasi:http proxy, cron, and the
+/// platform bindings. Mirrors the host's `worker` world.
+world worker {
+    include wasi:http/proxy@0.2.12;
+    include openworkers:bindings/imports@0.1.0;
+    export scheduled;
+}
+
+/// What the SDK generates against: everything a guest imports plus the fetch
+/// export. `#[event(scheduled)]` adds the cron export from `scheduled-only`,
+/// so a worker without one carries no scheduled export and the host can tell.
+world fetch-worker {
+    include wasi:http/proxy@0.2.12;
+    include openworkers:bindings/imports@0.1.0;
+    import wasi:cli/environment@0.2.12;
+}
+
+/// The cron export on its own
+world scheduled-only {
+    export scheduled;
+}

@@ -1,0 +1,17 @@
+[package]
+name = "openworkers-worker-macros"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Procedural macros for openworkers-worker"
+license = "MIT"
+repository = "https://github.com/openworkers/openworkers-worker"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+proc-macro-crate = "3"
