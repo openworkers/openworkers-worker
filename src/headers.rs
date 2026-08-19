@@ -172,7 +172,7 @@ impl From<Headers> for HeaderMap {
     }
 }
 
-impl TryFrom<&Headers> for crate::wit::wasi::http::types::Fields {
+impl TryFrom<&Headers> for crate::wit::wasi::http0_2_0::types::Fields {
     type Error = Error;
 
     fn try_from(headers: &Headers) -> Result<Self> {
@@ -181,7 +181,7 @@ impl TryFrom<&Headers> for crate::wit::wasi::http::types::Fields {
             .map(|(name, value)| (name, value.into_bytes()))
             .collect();
 
-        crate::wit::wasi::http::types::Fields::from_list(&entries)
+        crate::wit::wasi::http0_2_0::types::Fields::from_list(&entries)
             .map_err(|e| Error::RustError(format!("invalid headers: {e:?}")))
     }
 }

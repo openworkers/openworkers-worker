@@ -1,5 +1,6 @@
-//! The response a handler hands back. Bodies are buffered, so there is no
-//! stream variant: `from_stream` collects instead.
+//! The response a handler hands back. On the 0.2 world bodies are buffered,
+//! so `from_stream` collects; on the 0.3 world the stream variant flows to
+//! the host as a real `stream<u8>`.
 
 use bytes::Bytes;
 use serde::de::DeserializeOwned;
@@ -11,11 +12,26 @@ use crate::Headers;
 use crate::Result;
 
 /// The body of a [`Response`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub enum ResponseBody {
     #[default]
     Empty,
     Body(Vec<u8>),
+    #[cfg(feature = "p3")]
+    Stream(ByteStream),
+}
+
+impl Clone for ResponseBody {
+    fn clone(&self) -> Self {
+        match self {
+            ResponseBody::Empty => ResponseBody::Empty,
+            ResponseBody::Body(bytes) => ResponseBody::Body(bytes.clone()),
+            #[cfg(feature = "p3")]
+            ResponseBody::Stream(_) => {
+                panic!("a streaming response body cannot be cloned; read it first")
+            }
+        }
+    }
 }
 
 impl ResponseBody {
@@ -23,6 +39,19 @@ impl ResponseBody {
         match self {
             ResponseBody::Empty => Vec::new(),
             ResponseBody::Body(bytes) => bytes,
+            #[cfg(feature = "p3")]
+            ResponseBody::Stream(_) => {
+                panic!("a streaming response body has no buffered form; read it as a stream")
+            }
+        }
+    }
+
+    async fn collect(self) -> Result<Vec<u8>> {
+        match self {
+            ResponseBody::Empty => Ok(Vec::new()),
+            ResponseBody::Body(bytes) => Ok(bytes),
+            #[cfg(feature = "p3")]
+            ResponseBody::Stream(stream) => stream.collect_bytes().await,
         }
     }
 }
@@ -116,11 +145,15 @@ impl Response {
     }
 
     pub async fn bytes(&mut self) -> Result<Vec<u8>> {
-        Ok(std::mem::take(&mut self.body).into_bytes())
+        std::mem::take(&mut self.body).collect().await
     }
 
     pub fn stream(&mut self) -> Result<ByteStream> {
-        Ok(ByteStream::new(std::mem::take(&mut self.body).into_bytes()))
+        match std::mem::take(&mut self.body) {
+            #[cfg(feature = "p3")]
+            ResponseBody::Stream(stream) => Ok(stream),
+            body => Ok(ByteStream::new(body.into_bytes())),
+        }
     }
 
     pub fn with_headers(mut self, headers: Headers) -> Self {
@@ -237,6 +270,7 @@ impl ResponseBuilder {
         Ok(self.fixed(bytes))
     }
 
+    #[cfg(not(feature = "p3"))]
     pub fn from_stream<S>(self, stream: S) -> Result<Response>
     where
         S: futures_util::Stream<Item = Result<Vec<u8>>> + 'static,
@@ -252,6 +286,14 @@ impl ResponseBuilder {
         }
 
         Ok(self.fixed(body))
+    }
+
+    #[cfg(feature = "p3")]
+    pub fn from_stream<S>(self, stream: S) -> Result<Response>
+    where
+        S: futures_util::Stream<Item = Result<Vec<u8>>> + 'static,
+    {
+        Ok(self.body(ResponseBody::Stream(ByteStream::boxed(stream))))
     }
 
     pub fn ok(self, body: impl Into<String>) -> Result<Response> {
@@ -318,8 +360,13 @@ impl TryFrom<Response> for http::Response<crate::http_body::Body> {
             builder = builder.header(name, value);
         }
 
-        builder
-            .body(crate::http_body::Body::from(body.into_bytes()))
-            .map_err(Error::Http)
+        let body = match body {
+            ResponseBody::Empty => crate::http_body::Body::empty(),
+            ResponseBody::Body(bytes) => crate::http_body::Body::from(bytes),
+            #[cfg(feature = "p3")]
+            ResponseBody::Stream(stream) => crate::http_body::Body::from_stream(stream),
+        };
+
+        builder.body(body).map_err(Error::Http)
     }
 }

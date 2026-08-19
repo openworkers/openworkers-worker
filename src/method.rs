@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::wit::wasi::http::types::Method as WasiMethod;
+use crate::wit::wasi::http0_2_0::types::Method as WasiMethod;
 
 /// The method of a request, as workers-rs spells it.
 #[derive(Default, Debug, Clone, PartialEq, Hash, Eq)]
@@ -111,6 +111,45 @@ impl From<&Method> for WasiMethod {
             Method::Trace => WasiMethod::Trace,
             Method::Patch => WasiMethod::Patch,
             Method::Report => WasiMethod::Other("REPORT".to_string()),
+        }
+    }
+}
+
+#[cfg(feature = "p3")]
+use crate::wit_v3::wasi::http0_3_0::types::Method as V3Method;
+
+#[cfg(feature = "p3")]
+impl From<V3Method> for Method {
+    fn from(method: V3Method) -> Self {
+        match method {
+            V3Method::Get => Method::Get,
+            V3Method::Head => Method::Head,
+            V3Method::Post => Method::Post,
+            V3Method::Put => Method::Put,
+            V3Method::Delete => Method::Delete,
+            V3Method::Connect => Method::Connect,
+            V3Method::Options => Method::Options,
+            V3Method::Trace => Method::Trace,
+            V3Method::Patch => Method::Patch,
+            V3Method::Other(other) => Method::from(other),
+        }
+    }
+}
+
+#[cfg(feature = "p3")]
+impl From<&Method> for V3Method {
+    fn from(method: &Method) -> Self {
+        match method {
+            Method::Get => V3Method::Get,
+            Method::Head => V3Method::Head,
+            Method::Post => V3Method::Post,
+            Method::Put => V3Method::Put,
+            Method::Delete => V3Method::Delete,
+            Method::Connect => V3Method::Connect,
+            Method::Options => V3Method::Options,
+            Method::Trace => V3Method::Trace,
+            Method::Patch => V3Method::Patch,
+            Method::Report => V3Method::Other("REPORT".to_string()),
         }
     }
 }

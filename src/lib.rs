@@ -49,6 +49,21 @@ pub mod wit_scheduled {
     });
 }
 
+/// Bindings for the WASI 0.3 world. The wit declares `handle` as an async
+/// func, so wit-bindgen emits async bindings without further options.
+#[cfg(feature = "p3")]
+#[doc(hidden)]
+pub mod wit_v3 {
+    wit_bindgen::generate!({
+        world: "fetch-worker-v3",
+        path: "wit",
+        generate_all,
+        pub_export_macro: true,
+        export_macro_name: "__export_worker_http_v3",
+        default_bindings_module: "openworkers_worker::wit_v3",
+    });
+}
+
 #[macro_use]
 mod console;
 
@@ -67,6 +82,8 @@ mod request;
 mod request_init;
 mod response;
 mod rt;
+#[cfg(feature = "p3")]
+mod rt_v3;
 mod schedule;
 mod streams;
 
@@ -156,6 +173,55 @@ pub type HttpResponse = ::http::Response<crate::http_body::Body>;
 
 #[doc(hidden)]
 pub mod __private {
+    #[cfg(not(feature = "p3"))]
     pub use crate::glue::serve_fetch;
+    #[cfg(feature = "p3")]
+    pub use crate::glue::serve_fetch_v3;
     pub use crate::glue::serve_scheduled;
+}
+
+/// What `#[event(fetch)]` expands through: the same macro name emits the
+/// 0.2 or the 0.3 export depending on the `p3` feature, so the application
+/// code does not change when it switches worlds.
+#[cfg(not(feature = "p3"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __emit_fetch_export {
+    ($component:ident, $handler:path, $respond_with_errors:expr) => {
+        impl $crate::wit::exports::wasi::http0_2_0::incoming_handler::Guest for $component {
+            fn handle(
+                request: $crate::wit::wasi::http0_2_0::types::IncomingRequest,
+                response_out: $crate::wit::wasi::http0_2_0::types::ResponseOutparam,
+            ) {
+                $crate::__private::serve_fetch(
+                    request,
+                    response_out,
+                    $respond_with_errors,
+                    $handler,
+                )
+            }
+        }
+
+        $crate::wit::__export_worker_http!($component with_types_in $crate::wit);
+    };
+}
+
+#[cfg(feature = "p3")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __emit_fetch_export {
+    ($component:ident, $handler:path, $respond_with_errors:expr) => {
+        impl $crate::wit_v3::exports::wasi::http0_3_0::handler::Guest for $component {
+            async fn handle(
+                request: $crate::wit_v3::wasi::http0_3_0::types::Request,
+            ) -> ::std::result::Result<
+                $crate::wit_v3::wasi::http0_3_0::types::Response,
+                $crate::wit_v3::wasi::http0_3_0::types::ErrorCode,
+            > {
+                $crate::__private::serve_fetch_v3(request, $respond_with_errors, $handler).await
+            }
+        }
+
+        $crate::wit_v3::__export_worker_http_v3!($component with_types_in $crate::wit_v3);
+    };
 }

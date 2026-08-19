@@ -138,7 +138,7 @@ pub mod wasm_bindgen {
 
 /// See [`js_sys::Date`].
 pub mod js_sys {
-    use crate::wit::wasi::clocks::wall_clock;
+    use crate::wit::wasi::clocks0_2_0::wall_clock;
 
     /// The slice of the JavaScript `Date` a worker actually reads.
     #[derive(Debug)]
@@ -154,7 +154,11 @@ pub mod js_sys {
     }
 }
 
-/// See [`wasm_bindgen_futures::spawn_local`].
+/// See [`wasm_bindgen_futures::spawn_local`]. On the 0.3 world tasks go to
+/// wit-bindgen's executor, which outlives the handler's poll loop.
 pub mod wasm_bindgen_futures {
+    #[cfg(not(feature = "p3"))]
     pub use crate::rt::spawn_local;
+    #[cfg(feature = "p3")]
+    pub use wit_bindgen::spawn_local;
 }

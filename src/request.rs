@@ -1,6 +1,9 @@
-//! The incoming request. Bodies are buffered at the host boundary, so a
-//! `Request` owns its bytes and `clone` really does hand out a second
-//! readable copy the way `Request.clone()` does in JavaScript.
+//! The incoming request. On the 0.2 world bodies are buffered at the host
+//! boundary, so a `Request` owns its bytes and `clone` really does hand out
+//! a second readable copy the way `Request.clone()` does in JavaScript. On
+//! the 0.3 world the body arrives as a stream: reading buffers as usual,
+//! `stream()` hands the live stream out, and cloning an unread streaming
+//! body is refused, as with a disturbed JavaScript body.
 
 use bytes::Bytes;
 use serde::de::DeserializeOwned;
@@ -14,13 +17,33 @@ use crate::Method;
 use crate::RequestInit;
 use crate::Result;
 
+/// Where the body bytes come from; only the 0.3 world produces streams
+#[derive(Debug)]
+pub(crate) enum BodySource {
+    Buffered(Vec<u8>),
+    #[cfg(feature = "p3")]
+    Streamed(ByteStream),
+}
+
+impl Clone for BodySource {
+    fn clone(&self) -> Self {
+        match self {
+            BodySource::Buffered(bytes) => BodySource::Buffered(bytes.clone()),
+            #[cfg(feature = "p3")]
+            BodySource::Streamed(_) => {
+                panic!("a streaming request body cannot be cloned; read it first")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Request {
     method: Method,
     url: Url,
     path: String,
     headers: Headers,
-    body: Option<Vec<u8>>,
+    body: Option<BodySource>,
     immutable: bool,
 }
 
@@ -43,11 +66,13 @@ impl Request {
         let mut request = Request::new(uri, init.method.clone())?;
 
         request.headers = init.headers.clone();
-        request.body = init.body.as_ref().map(|body| match &body.0 {
-            Value::Str(text) => text.clone().into_bytes(),
-            Value::Bytes(bytes) => bytes.clone(),
-            Value::Null | Value::Undefined => Vec::new(),
-            _ => body.to_string().into_bytes(),
+        request.body = init.body.as_ref().map(|body| {
+            BodySource::Buffered(match &body.0 {
+                Value::Str(text) => text.clone().into_bytes(),
+                Value::Bytes(bytes) => bytes.clone(),
+                Value::Null | Value::Undefined => Vec::new(),
+                _ => body.to_string().into_bytes(),
+            })
         });
 
         Ok(request)
@@ -57,7 +82,7 @@ impl Request {
         method: Method,
         url: Url,
         headers: Headers,
-        body: Option<Vec<u8>>,
+        body: Option<BodySource>,
     ) -> Self {
         Request {
             path: url.path().to_string(),
@@ -70,23 +95,37 @@ impl Request {
     }
 
     pub async fn json<B: DeserializeOwned>(&mut self) -> Result<B> {
-        serde_json::from_slice(&self.take_body()?).map_err(Error::SerdeJsonError)
+        serde_json::from_slice(&self.bytes().await?).map_err(Error::SerdeJsonError)
     }
 
     pub async fn text(&mut self) -> Result<String> {
-        String::from_utf8(self.take_body()?).map_err(Error::from)
+        String::from_utf8(self.bytes().await?).map_err(Error::from)
     }
 
     pub async fn bytes(&mut self) -> Result<Vec<u8>> {
-        self.take_body()
+        match self.take_body()? {
+            BodySource::Buffered(bytes) => Ok(bytes),
+            #[cfg(feature = "p3")]
+            BodySource::Streamed(stream) => stream.collect_bytes().await,
+        }
     }
 
     pub fn stream(&mut self) -> Result<ByteStream> {
-        Ok(ByteStream::new(self.take_body()?))
+        match self.take_body()? {
+            BodySource::Buffered(bytes) => Ok(ByteStream::new(bytes)),
+            #[cfg(feature = "p3")]
+            BodySource::Streamed(stream) => Ok(stream),
+        }
     }
 
-    fn take_body(&mut self) -> Result<Vec<u8>> {
+    fn take_body(&mut self) -> Result<BodySource> {
         self.body.take().ok_or(Error::BodyUsed)
+    }
+
+    /// Whether `Clone::clone` would panic on this request
+    #[cfg(feature = "p3")]
+    fn body_is_streaming(&self) -> bool {
+        matches!(self.body, Some(BodySource::Streamed(_)))
     }
 
     pub fn headers(&self) -> &Headers {
@@ -138,11 +177,18 @@ impl Request {
     /// A second handle on the same request, with its own readable body.
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&self) -> Result<Self> {
+        #[cfg(feature = "p3")]
+        if self.body_is_streaming() {
+            return Err(Error::RustError(
+                "a streaming request body cannot be cloned; read it first".into(),
+            ));
+        }
+
         Ok(Clone::clone(self))
     }
 
     pub fn clone_mut(&self) -> Result<Self> {
-        let mut request = Clone::clone(self);
+        let mut request = self.clone()?;
         request.immutable = false;
         request.headers = self.headers.entries().collect();
 
@@ -193,7 +239,7 @@ impl<B: http_body::Body<Data = Bytes> + 'static> TryFrom<http::Request<B>> for R
             method: Method::from(parts.method.as_str().to_string()),
             url,
             headers: Headers::from(&parts.headers),
-            body: Some(body.to_vec()),
+            body: Some(BodySource::Buffered(body.to_vec())),
             immutable: false,
         })
     }
@@ -203,7 +249,12 @@ impl TryFrom<Request> for http::Request<crate::http_body::Body> {
     type Error = Error;
 
     fn try_from(mut request: Request) -> Result<Self> {
-        let body = request.body.take().unwrap_or_default();
+        let body = match request.body.take() {
+            None => crate::http_body::Body::empty(),
+            Some(BodySource::Buffered(bytes)) => crate::http_body::Body::from(bytes),
+            #[cfg(feature = "p3")]
+            Some(BodySource::Streamed(stream)) => crate::http_body::Body::from_stream(stream),
+        };
 
         let mut builder = http::Request::builder()
             .method(request.method.as_ref())
@@ -213,8 +264,6 @@ impl TryFrom<Request> for http::Request<crate::http_body::Body> {
             builder = builder.header(name, value);
         }
 
-        builder
-            .body(crate::http_body::Body::from(body))
-            .map_err(Error::Http)
+        builder.body(body).map_err(Error::Http)
     }
 }

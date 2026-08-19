@@ -18,6 +18,10 @@ exclude = ["examples/hello", "examples/health-shapes"]
 default = []
 d1 = []
 http = []
+# Target the WASI 0.3 fetch-worker-v3 world instead of the 0.2 one: the
+# handler export turns async, bodies become real streams and wait_until
+# outlives the response. The worker-facing API does not change.
+p3 = ["wit-bindgen/async", "wit-bindgen/async-spawn"]
 
 [dependencies]
 openworkers-worker-macros = { version = "0.1.0", path = "macros" }

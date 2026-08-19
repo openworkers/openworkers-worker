@@ -1,14 +1,22 @@
-//! Outbound requests, through `wasi:http/outgoing-handler`.
+//! Outbound requests, through `wasi:http/outgoing-handler` on the 0.2
+//! world and the async `wasi:http/client` on the 0.3 one.
 
 use url::Url;
 
-use crate::wit::wasi::http::outgoing_handler;
-use crate::wit::wasi::http::types::Fields;
-use crate::wit::wasi::http::types::IncomingBody;
-use crate::wit::wasi::http::types::OutgoingBody;
-use crate::wit::wasi::http::types::OutgoingRequest;
-use crate::wit::wasi::http::types::Scheme;
+#[cfg(not(feature = "p3"))]
+use crate::wit::wasi::http0_2_0::outgoing_handler;
+#[cfg(not(feature = "p3"))]
+use crate::wit::wasi::http0_2_0::types::Fields;
+#[cfg(not(feature = "p3"))]
+use crate::wit::wasi::http0_2_0::types::IncomingBody;
+#[cfg(not(feature = "p3"))]
+use crate::wit::wasi::http0_2_0::types::OutgoingBody;
+#[cfg(not(feature = "p3"))]
+use crate::wit::wasi::http0_2_0::types::OutgoingRequest;
+#[cfg(not(feature = "p3"))]
+use crate::wit::wasi::http0_2_0::types::Scheme;
 use crate::Error;
+#[cfg(not(feature = "p3"))]
 use crate::Headers;
 use crate::Method;
 use crate::Request;
@@ -17,6 +25,7 @@ use crate::ResponseBuilder;
 use crate::Result;
 
 /// `wasi:io` caps `blocking-write-and-flush` at this many bytes
+#[cfg(not(feature = "p3"))]
 const CHUNK_SIZE: usize = 4096;
 
 /// Either end of a `fetch` call: a bare URL or a prepared request.
@@ -46,6 +55,7 @@ impl Fetch {
 #[derive(Debug, Clone, Default)]
 pub struct AbortSignal;
 
+#[cfg(not(feature = "p3"))]
 async fn send(mut request: Request) -> Result<Response> {
     let url = request.url()?;
     let body = request.bytes().await.unwrap_or_default();
@@ -119,6 +129,7 @@ async fn send(mut request: Request) -> Result<Response> {
         .fixed(bytes))
 }
 
+#[cfg(not(feature = "p3"))]
 pub(crate) fn fields_to_headers(fields: &Fields) -> Headers {
     let headers = Headers::new();
 
@@ -133,6 +144,7 @@ pub(crate) fn fields_to_headers(fields: &Fields) -> Headers {
 
 /// Reads an incoming body to its end; `blocking-read` reports the end as an
 /// error, which is why the loop stops on `Err` rather than reporting it.
+#[cfg(not(feature = "p3"))]
 pub(crate) fn read_body(body: IncomingBody) -> Result<Vec<u8>> {
     let stream = body
         .stream()
@@ -147,6 +159,7 @@ pub(crate) fn read_body(body: IncomingBody) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+#[cfg(not(feature = "p3"))]
 pub(crate) fn write_body(body: &OutgoingBody, bytes: &[u8]) -> Result<()> {
     if bytes.is_empty() {
         return Ok(());
@@ -163,4 +176,90 @@ pub(crate) fn write_body(body: &OutgoingBody, bytes: &[u8]) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// The 0.3 outbound path: `client.send` is an async import, the response
+/// body comes back as a stream and stays one.
+#[cfg(feature = "p3")]
+async fn send(mut request: Request) -> Result<Response> {
+    use crate::glue::fields_from_headers;
+    use crate::glue::fields_to_headers_v3;
+    use crate::streams::ByteStream;
+    use crate::streams::IncomingStream;
+    use crate::wit_v3::wasi::http0_3_0::client;
+    use crate::wit_v3::wasi::http0_3_0::types::Request as WitRequest;
+    use crate::wit_v3::wasi::http0_3_0::types::Response as WitResponse;
+    use crate::wit_v3::wasi::http0_3_0::types::Scheme;
+    use crate::wit_v3::wit_future;
+    use crate::wit_v3::wit_stream;
+    use crate::ResponseBody;
+
+    let url = request.url()?;
+    let body = request.bytes().await.unwrap_or_default();
+
+    let headers = fields_from_headers(request.headers())?;
+
+    let (mut body_tx, body_rx) = wit_stream::new::<u8>();
+    let (trailers_tx, trailers_rx) = wit_future::new(|| Ok(None));
+    let (outgoing, _transmit) = WitRequest::new(headers, Some(body_rx), trailers_rx, None);
+
+    outgoing
+        .set_method(&(&request.method()).into())
+        .map_err(|()| Error::RustError("fetch: unsupported method".into()))?;
+
+    let scheme = match url.scheme() {
+        "http" => Scheme::Http,
+        "https" => Scheme::Https,
+        other => Scheme::Other(other.to_string()),
+    };
+
+    outgoing
+        .set_scheme(Some(&scheme))
+        .map_err(|()| Error::RustError("fetch: unsupported scheme".into()))?;
+
+    let authority = match url.port() {
+        Some(port) => format!("{}:{port}", url.host_str().unwrap_or_default()),
+        None => url.host_str().unwrap_or_default().to_string(),
+    };
+
+    outgoing
+        .set_authority(Some(&authority))
+        .map_err(|()| Error::RustError(format!("fetch: invalid authority `{authority}`")))?;
+
+    let target = match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_string(),
+    };
+
+    outgoing
+        .set_path_with_query(Some(&target))
+        .map_err(|()| Error::RustError(format!("fetch: invalid path `{target}`")))?;
+
+    wit_bindgen::spawn_local(async move {
+        if !body.is_empty() {
+            let _ = body_tx.write_all(body).await;
+        }
+
+        drop(body_tx);
+        let _ = trailers_tx.write(Ok(None)).await;
+    });
+
+    let incoming = client::send(outgoing)
+        .await
+        .map_err(|e| Error::RustError(format!("fetch: {e}")))?;
+
+    let status = incoming.get_status_code();
+    let headers = fields_to_headers_v3(&incoming.get_headers());
+
+    let (done_tx, done_rx) = wit_future::new(|| Ok(()));
+    drop(done_tx);
+
+    let (reader, _trailers) = WitResponse::consume_body(incoming, done_rx);
+
+    Ok(ResponseBuilder::new()
+        .with_status(status)
+        .with_headers(headers)
+        .body(ResponseBody::Stream(ByteStream::live(IncomingStream::new(
+            reader,
+        )))))
 }

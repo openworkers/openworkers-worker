@@ -1,5 +1,6 @@
-//! The `http` crate bridge: a buffered [`Body`] and the collector the
-//! `TryFrom` conversions use.
+//! The `http` crate bridge: a [`Body`] carrying either buffered bytes or,
+//! on the 0.3 world, a live stream, and the collector the `TryFrom`
+//! conversions use.
 
 use std::pin::Pin;
 use std::task::Context;
@@ -12,17 +13,42 @@ use http_body::Frame;
 use crate::Error;
 use crate::Result;
 
-/// A body that already holds all of its bytes.
-#[derive(Debug, Clone, Default)]
-pub struct Body(Option<Bytes>);
+/// A body holding its bytes, or pulling them from a stream on the 0.3 world.
+#[derive(Debug, Default)]
+pub struct Body(BodyInner);
+
+#[derive(Debug, Default)]
+enum BodyInner {
+    #[default]
+    Empty,
+    Bytes(Bytes),
+    #[cfg(feature = "p3")]
+    Stream(crate::streams::ByteStream),
+}
 
 impl Body {
     pub fn empty() -> Self {
-        Body(None)
+        Body(BodyInner::Empty)
     }
 
     pub fn new(bytes: impl Into<Bytes>) -> Self {
-        Body(Some(bytes.into()))
+        Body(BodyInner::Bytes(bytes.into()))
+    }
+
+    #[cfg(feature = "p3")]
+    pub(crate) fn from_stream(stream: crate::streams::ByteStream) -> Self {
+        Body(BodyInner::Stream(stream))
+    }
+}
+
+impl Clone for Body {
+    fn clone(&self) -> Self {
+        match &self.0 {
+            BodyInner::Empty => Body(BodyInner::Empty),
+            BodyInner::Bytes(bytes) => Body(BodyInner::Bytes(bytes.clone())),
+            #[cfg(feature = "p3")]
+            BodyInner::Stream(_) => panic!("a streaming body cannot be cloned; read it first"),
+        }
     }
 }
 
@@ -32,13 +58,34 @@ impl http_body::Body for Body {
 
     fn poll_frame(
         mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
     ) -> Poll<Option<std::result::Result<Frame<Self::Data>, Self::Error>>> {
-        Poll::Ready(self.0.take().map(|bytes| Ok(Frame::data(bytes))))
+        let _ = cx;
+
+        match &mut self.0 {
+            BodyInner::Empty => Poll::Ready(None),
+            BodyInner::Bytes(bytes) => {
+                let bytes = std::mem::take(bytes);
+                self.0 = BodyInner::Empty;
+
+                Poll::Ready(Some(Ok(Frame::data(bytes))))
+            }
+            #[cfg(feature = "p3")]
+            BodyInner::Stream(stream) => {
+                match futures_util::Stream::poll_next(Pin::new(stream), cx) {
+                    Poll::Ready(Some(Ok(chunk))) => {
+                        Poll::Ready(Some(Ok(Frame::data(Bytes::from(chunk)))))
+                    }
+                    Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
+                    Poll::Ready(None) => Poll::Ready(None),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
     }
 
     fn is_end_stream(&self) -> bool {
-        self.0.is_none()
+        matches!(self.0, BodyInner::Empty)
     }
 }
 

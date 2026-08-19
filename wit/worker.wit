@@ -21,6 +21,24 @@ world fetch-worker {
     import wasi:cli/environment@0.2.0;
 }
 
+/// The WASI 0.3 HTTP guest: the async `wasi:http/handler` export, whose
+/// native `stream<u8>` bodies and post-return execution give it what the
+/// 0.2 world cannot express - streamed bodies and work that outlives the
+/// response. The platform bindings stay at their 0.2-era sync ABI: a sync
+/// import is legal in an async world, and the host serves both identically.
+///
+/// wasi:http is pinned at 0.3.0 exactly, not declared as a floor: 0.3 is
+/// pre-release-grade and its patch releases have broken the canonical ABI
+/// before, so the host vendors the one revision it implements.
+world fetch-worker-v3 {
+    import wasi:http/types@0.3.0;
+    import wasi:http/client@0.3.0;
+    include openworkers:bindings/imports@0.1.0;
+    import wasi:cli/environment@0.2.0;
+
+    export wasi:http/handler@0.3.0;
+}
+
 /// The cron export on its own; a guest adds it only when it has a handler,
 /// because exporting an empty one tells the host it handles cron
 world scheduled-only {

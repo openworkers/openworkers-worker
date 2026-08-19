@@ -99,6 +99,8 @@ pub fn expand_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let component = Ident::new(&format!("__OpenWorkersFetch_{fn_ident}"), fn_ident.span());
 
+            // The SDK picks the exported world by feature, which the macro
+            // cannot see from here
             quote! {
                 #input_fn
 
@@ -106,21 +108,7 @@ pub fn expand_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #[allow(non_camel_case_types)]
                 struct #component;
 
-                impl #krate::wit::exports::wasi::http::incoming_handler::Guest for #component {
-                    fn handle(
-                        request: #krate::wit::wasi::http::types::IncomingRequest,
-                        response_out: #krate::wit::wasi::http::types::ResponseOutparam,
-                    ) {
-                        #krate::__private::serve_fetch(
-                            request,
-                            response_out,
-                            #respond_with_errors,
-                            #fn_ident,
-                        )
-                    }
-                }
-
-                #krate::wit::__export_worker_http!(#component with_types_in #krate::wit);
+                #krate::__emit_fetch_export!(#component, #fn_ident, #respond_with_errors);
             }
             .into()
         }
