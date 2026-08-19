@@ -1,0 +1,19 @@
+[package]
+name = "health-shapes"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+# The rename a workers-rs application makes to move over
+[dependencies]
+worker = { package = "openworkers-worker", path = "../..", features = ["d1"] }
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+[workspace]

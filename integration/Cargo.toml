@@ -1,0 +1,16 @@
+[package]
+name = "openworkers-worker-integration"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Runs the example workers through openworkers-runtime-wasm"
+license = "MIT"
+
+[dev-dependencies]
+openworkers-runtime-wasm = { path = "../../openworkers-runtime-wasm" }
+openworkers-core = { git = "https://github.com/openworkers/openworkers-core", tag = "v0.14.0", features = [
+    "wasm",
+] }
+bytes = "1"
+tokio = { version = "1", features = ["full", "macros"] }
+serde_json = "1"
