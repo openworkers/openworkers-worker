@@ -17,3 +17,7 @@ opt-level = "s"
 lto = true
 
 [workspace]
+
+# Same application, WASI 0.3 world
+[features]
+p3 = ["worker/p3"]

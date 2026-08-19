@@ -11,6 +11,11 @@ crate-type = ["cdylib"]
 [dependencies]
 worker = { package = "openworkers-worker", path = "../.." }
 futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false }
+
+# Same application, WASI 0.3 world
+[features]
+p3 = ["worker/p3"]
 
 [profile.release]
 opt-level = "s"

@@ -37,6 +37,34 @@ async fn fetch(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
 
             Response::ok(rx.await.map_err(|e| Error::RustError(e.to_string()))?)
         }
+        // Reads the body chunk by chunk; on the 0.3 world the whole body
+        // never exists in guest memory
+        "/stream-sum" => {
+            use futures_util::StreamExt;
+
+            let mut stream = req.stream()?;
+            let mut total: u64 = 0;
+
+            while let Some(chunk) = stream.next().await {
+                total += chunk?.len() as u64;
+            }
+
+            Response::ok(total.to_string())
+        }
+        // Emits `mb` megabytes without ever holding more than a chunk on
+        // the 0.3 world; the 0.2 world collects them
+        "/stream-out" => {
+            let mb: usize = url
+                .query()
+                .and_then(|q| q.strip_prefix("mb="))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1);
+
+            let chunks =
+                futures_util::stream::iter((0..mb * 16).map(|_| Ok(vec![b'x'; 64 * 1024])));
+
+            Response::from_stream(chunks)
+        }
         "/headers" => {
             let headers = Headers::new();
             headers.set("x-seen-host", url.host_str().unwrap_or_default())?;
@@ -44,11 +72,15 @@ async fn fetch(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
             Ok(Response::ok("headers")?.with_headers(headers))
         }
         _ => {
-            let greeting = env.var("GREETING").map_or("Hello".to_string(), |v| v.to_string());
+            let greeting = env
+                .var("GREETING")
+                .map_or("Hello".to_string(), |v| v.to_string());
 
             console_log!("{} {}", req.method(), url.path());
 
-            Response::ok(format!("{greeting} from openworkers-worker!\nYou requested: {url}"))
+            Response::ok(format!(
+                "{greeting} from openworkers-worker!\nYou requested: {url}"
+            ))
         }
     }
 }

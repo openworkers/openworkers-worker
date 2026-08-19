@@ -100,7 +100,10 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         "/r2" => {
             let bucket = env.bucket("PHOTOS")?;
 
-            bucket.put("logo.png", b"png bytes".to_vec()).execute().await?;
+            bucket
+                .put("logo.png", b"png bytes".to_vec())
+                .execute()
+                .await?;
 
             let object = bucket.get("logo.png").execute().await?;
             let Some(object) = object else {
@@ -151,7 +154,12 @@ async fn tick(event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         Ok(statement) => match statement.run().await {
             Ok(result) => console_log!(
                 "cron: pruned {}",
-                result.meta().ok().flatten().and_then(|meta| meta.changes).unwrap_or(0)
+                result
+                    .meta()
+                    .ok()
+                    .flatten()
+                    .and_then(|meta| meta.changes)
+                    .unwrap_or(0)
             ),
             Err(e) => console_log!("cron: prune failed: {e}"),
         },
