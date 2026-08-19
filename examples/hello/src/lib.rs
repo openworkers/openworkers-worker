@@ -26,6 +26,17 @@ async fn fetch(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
 
             Response::ok("queued")
         }
+        // The bridge a workers-rs application uses to hand a `!Send` future
+        // to a framework that wants `Send`
+        "/bridge" => {
+            let (tx, rx) = futures_channel::oneshot::channel();
+
+            worker::wasm_bindgen_futures::spawn_local(async move {
+                let _ = tx.send("bridged".to_string());
+            });
+
+            Response::ok(rx.await.map_err(|e| Error::RustError(e.to_string()))?)
+        }
         "/headers" => {
             let headers = Headers::new();
             headers.set("x-seen-host", url.host_str().unwrap_or_default())?;

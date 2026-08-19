@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 # The rename a workers-rs application makes to move over
 [dependencies]
 worker = { package = "openworkers-worker", path = "../.." }
+futures-channel = "0.3"
 
 [profile.release]
 opt-level = "s"

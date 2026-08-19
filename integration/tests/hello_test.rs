@@ -215,3 +215,18 @@ async fn scheduled_handler_runs() {
         ops.logs.lock().unwrap()
     );
 }
+
+#[tokio::test]
+async fn a_oneshot_bridge_resumes_the_handler() {
+    let mut worker = WasmWorker::new(script("hello", None), None, None)
+        .await
+        .expect("worker");
+
+    let (event, rx) = Event::fetch(get("https://example.com/bridge"));
+    worker.exec(event).await.expect("exec");
+
+    let response = rx.await.expect("response");
+
+    assert_eq!(response.status, 200);
+    assert_eq!(body_of(&response), "bridged");
+}

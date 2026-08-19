@@ -92,9 +92,14 @@ pub fn drain_tasks() {
 }
 
 /// Polls every queued task once and drops the finished ones. Returns whether
-/// any task is still queued, which is the only way progress can still happen.
+/// there was anything to poll, which is the only way the caller's future can
+/// still be woken.
 fn poll_tasks(cx: &mut Context<'_>) -> bool {
     let mut queued = TASKS.with(|tasks| std::mem::take(&mut *tasks.borrow_mut()));
+
+    if queued.is_empty() {
+        return false;
+    }
 
     queued.retain_mut(|task| task.as_mut().poll(cx).is_pending());
 
@@ -103,6 +108,7 @@ fn poll_tasks(cx: &mut Context<'_>) -> bool {
         // A task may have spawned another while it was polled; keep both.
         queued.append(&mut tasks);
         *tasks = queued;
-        !tasks.is_empty()
-    })
+    });
+
+    true
 }

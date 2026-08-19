@@ -49,6 +49,27 @@ A worker with only a fetch handler exports `wasi:http/incoming-handler` alone;
 adding `#[event(scheduled)]` adds `openworkers:worker/scheduled`, which is how
 the host tells a cron-capable worker from one that only serves HTTP.
 
+## Migrating a workers-rs application
+
+Renaming the dependency is the whole SDK change. What else has to go is
+anything that talks to JavaScript directly, because wasm-bindgen's imports
+have no host on `wasm32-wasip2` and panic with *"cannot call wasm-bindgen
+imported functions on non-wasm targets"* the first time they run:
+
+1. Drop the `console_error_panic_hook` dependency and add
+   `use worker::console_error_panic_hook;`. The call site stays as it is.
+2. Drop the `wasm-bindgen-futures` dependency and reach `spawn_local` through
+   `worker::wasm_bindgen_futures::spawn_local`.
+3. Drop `wasmbind` from `chrono`'s features, and `wasm-bindgen` from `time`'s.
+   Both read the clock through `std` once the feature is off.
+4. Replace any other `js_sys` / `wasm_bindgen` use. `worker::js_sys::Date` and
+   `worker::wasm_bindgen::JsValue` cover what a D1 or clock call site needs;
+   `Reflect`, `Promise`, `Uint8Array` and the rest have no counterpart.
+
+A real workers-rs status page (fetch handler, cron handler, two D1 bindings,
+`send_email`, `Fetch` webhooks, a router rendering HTML) needed exactly those
+four edits and then served its pages and ran its cron unchanged.
+
 ## What is implemented
 
 | Area | Status |
