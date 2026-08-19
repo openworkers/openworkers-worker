@@ -9,7 +9,7 @@
 //!
 //! The same `use worker::*`, the same `#[event(fetch)]`, the same
 //! `Request`/`Response`/`Headers`/`Env`. Underneath there is no JavaScript:
-//! the crate targets `wasm32-wasip2` and speaks `wasi:http/proxy@0.2.12`
+//! the crate targets `wasm32-wasip2` and speaks `wasi:http/proxy@0.2.0`
 //! plus OpenWorkers' own WIT to the host.
 //!
 //! # What is not here

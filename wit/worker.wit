@@ -6,24 +6,37 @@ interface scheduled {
     handle-scheduled: func(scheduled-time: u64);
 }
 
-/// Full OpenWorkers guest: the standard wasi:http proxy, cron, and the
-/// platform bindings. Mirrors the host's `worker` world.
-world worker {
-    include wasi:http/proxy@0.2.12;
+/// A guest that only serves HTTP: the standard wasi:http proxy, the
+/// environment its bindings are named in, and the platform bindings. Guests
+/// needing none of those can target wasi:http/proxy directly and run
+/// unmodified.
+///
+/// wasi is declared at 0.2.0, not at the host's patch level: the declared
+/// version is a floor, 0.2.x is semver-compatible, and both wasm-tools and
+/// wasmtime resolve these against the newer implementation the host links.
+/// Pinning higher only locks out toolchains that lag, TinyGo today.
+world fetch-worker {
+    include wasi:http/proxy@0.2.0;
     include openworkers:bindings/imports@0.1.0;
+    import wasi:cli/environment@0.2.0;
+}
+
+/// The cron export on its own; a guest adds it only when it has a handler,
+/// because exporting an empty one tells the host it handles cron
+world scheduled-only {
     export scheduled;
 }
 
-/// What the SDK generates against: everything a guest imports plus the fetch
-/// export. `#[event(scheduled)]` adds the cron export from `scheduled-only`,
-/// so a worker without one carries no scheduled export and the host can tell.
-world fetch-worker {
-    include wasi:http/proxy@0.2.12;
-    include openworkers:bindings/imports@0.1.0;
-    import wasi:cli/environment@0.2.12;
+/// Full OpenWorkers guest: HTTP, cron and the platform bindings
+world worker {
+    include fetch-worker;
+    include scheduled-only;
 }
 
-/// The cron export on its own
-world scheduled-only {
+/// Host-side view of what this runtime adds to wasi:http/proxy: the bindings
+/// it links and the cron export it calls. The HTTP side is bound through the
+/// wasi:http host implementation.
+world worker-host {
+    include openworkers:bindings/imports@0.1.0;
     export scheduled;
 }

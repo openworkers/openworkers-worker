@@ -16,7 +16,7 @@ worker = { package = "openworkers-worker", version = "0.1", features = ["d1"] }
 The same `use worker::*`, the same `#[event(fetch)]` and `#[event(scheduled)]`,
 the same `Request`/`Response`/`Headers`/`Env`/`D1Database`. Underneath there is
 no JavaScript, no wasm-bindgen and no V8: the crate targets `wasm32-wasip2` and
-speaks `wasi:http/proxy@0.2.12` plus `openworkers:bindings@0.1.0` to a wasmtime
+speaks `wasi:http/proxy@0.2.0` plus `openworkers:bindings@0.1.0` to a wasmtime
 host.
 
 ```
@@ -119,6 +119,8 @@ same loop drains before the export returns.
 ## Layout
 
 - `.` - the SDK
+- `wit/` - verbatim copy of the runtime's contract; the SDK generates against
+  its `fetch-worker` and `scheduled-only` worlds
 - `macros/` - `#[event]` and friends
 - `integration/` - runs the examples through `openworkers-runtime-wasm`
 - `examples/hello` - the smallest worker
