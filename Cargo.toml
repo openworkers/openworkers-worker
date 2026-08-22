@@ -11,8 +11,10 @@ categories = ["wasm", "web-programming"]
 exclude = ["examples/"]
 
 [workspace]
-members = [".", "macros", "integration"]
-exclude = ["examples/hello", "examples/health-shapes"]
+members = [".", "macros"]
+# integration needs sibling checkouts of the runtime repos, so it stays out
+# of the workspace a bare clone resolves
+exclude = ["examples/hello", "examples/health-shapes", "integration"]
 
 [features]
 default = []
