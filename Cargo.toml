@@ -14,7 +14,7 @@ exclude = ["examples/"]
 members = [".", "macros"]
 # integration needs sibling checkouts of the runtime repos, so it stays out
 # of the workspace a bare clone resolves
-exclude = ["examples/hello", "examples/health-shapes", "integration"]
+exclude = ["examples/hello", "examples/health-shapes", "examples/hello-web", "integration"]
 
 [features]
 default = []

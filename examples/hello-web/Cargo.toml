@@ -1,0 +1,21 @@
+[package]
+name = "hello-web"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+# The rename a workers-rs application makes to move over
+[dependencies]
+worker = { package = "openworkers-worker", path = "../.." }
+
+[features]
+p3 = ["worker/p3"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+[workspace]

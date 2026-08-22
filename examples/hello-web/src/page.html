@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hello-rust</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --card: #ffffff;
+    --fg: #1c1b19;
+    --muted: #6f6b63;
+    --accent: #ce4a1f;
+    --border: #e4e1da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171512;
+      --card: #201d19;
+      --fg: #ece9e2;
+      --muted: #9b968c;
+      --accent: #ff7a45;
+      --border: #322e28;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    width: min(34rem, calc(100vw - 2rem));
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem 2.5rem 2rem;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+  }
+  .crab { font-size: 2.5rem; line-height: 1; }
+  h1 { margin: 0.75rem 0 0.5rem; font-size: 1.9rem; letter-spacing: -0.02em; }
+  p.lead { margin: 0 0 1.75rem; color: var(--muted); }
+  dl {
+    margin: 0 0 1.75rem;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.35rem 1.25rem;
+    font-size: 0.9rem;
+  }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  dd.accent { color: var(--accent); }
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 1.25rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <div class="crab">&#129408;</div>
+  <h1>Hello from Rust</h1>
+  <p class="lead">
+    This page is served by a native WebAssembly component &mdash;
+    Rust compiled to <code>wasm32-wasip2</code>, executed by wasmtime.
+    No JavaScript engine involved.
+  </p>
+  <dl>
+    <dt>request</dt><dd>{method} {path}</dd>
+    <dt>guest sdk</dt><dd><a href="https://crates.io/crates/openworkers-worker">openworkers-worker 0.1</a></dd>
+    <dt>runtime</dt><dd class="accent">OpenWorkers 0.15</dd>
+  </dl>
+  <footer>
+    One Cargo rename away from a Cloudflare workers-rs app &mdash;
+    <a href="https://openworkers.com/blog/workers-rs-without-javascript">read how</a>
+    &middot; <a href="https://openworkers.com">openworkers.com</a>
+  </footer>
+</main>
+</body>
+</html>
