@@ -1,17 +1,14 @@
-//! The shapes a real workers-rs status page uses, in one worker: two D1
-//! bindings read through prepare/bind/all/first/run, KV, R2, an email
-//! announcement and a cron sweep.
-//!
-//! Every call site here is copied from a workers-rs application unchanged.
+//! The shapes a status page uses, in one worker: the database read and
+//! written through `query`, KV, storage, an email announcement and a cron
+//! sweep. The bindings have the names and the methods of `env.DB`, `env.KV`
+//! and `env.STORAGE` in a JavaScript worker; the SQL is PostgreSQL.
 //!
 //! Build with: cargo build --target wasm32-wasip2 --release
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use serde::Deserialize;
 use serde::Serialize;
-use worker::wasm_bindgen::JsValue;
+use serde_json::json;
+use serde_json::Value;
 use worker::*;
 
 /// A service to watch, as the configuration database describes it.
@@ -23,97 +20,109 @@ pub struct Target {
     pub expects: i64,
 }
 
-thread_local! {
-    static DB: RefCell<Option<Rc<D1Database>>> = const { RefCell::new(None) };
-}
-
-fn install(env: &Env) -> Result<()> {
-    let db = env.d1("DB")?;
-
-    DB.with(|cell| *cell.borrow_mut() = Some(Rc::new(db)));
-
-    Ok(())
-}
-
-fn db() -> Rc<D1Database> {
-    DB.with(|cell| cell.borrow().clone().expect("DB not installed"))
-}
-
-fn s(text: &str) -> JsValue {
-    JsValue::from_str(text)
-}
-
-fn n(value: i64) -> JsValue {
-    JsValue::from_f64(value as f64)
-}
-
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
-    install(&env)?;
 
     let url = req.url()?;
 
     match url.path() {
         "/targets" => {
-            let targets: Vec<Target> = db()
-                .prepare("SELECT slug, name, url, expects FROM targets ORDER BY name")
-                .all()
-                .await?
-                .results()?;
+            let targets: Vec<Target> = env
+                .database("DB")?
+                .query(
+                    "SELECT slug, name, url, expects FROM targets ORDER BY name",
+                    &[],
+                )
+                .await?;
 
             Response::from_json(&targets)
         }
         "/record" => {
-            let args = vec![s("api"), s("2026-08-19T10:00:00Z"), n(200), n(12), n(1)];
-            let result = db()
-                .prepare(
+            let params = [
+                json!("api"),
+                json!("2026-08-19T10:00:00Z"),
+                json!(200),
+                json!(12),
+                json!(true),
+            ];
+            let rows: Vec<Value> = env
+                .database("DB")?
+                .query(
                     "INSERT INTO checks (slug, at, status, latency_ms, ok) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                     VALUES ($1, $2, $3, $4, $5) RETURNING slug",
+                    &params,
                 )
-                .bind(&args)?
-                .run()
                 .await?;
 
-            let changes = result.meta()?.and_then(|meta| meta.changes).unwrap_or(0);
-
-            Response::ok(format!("recorded {changes}"))
+            Response::ok(format!("recorded {}", rows.len()))
         }
         "/first" => {
-            let name: Option<String> = db()
-                .prepare("SELECT name FROM targets WHERE slug = ?1")
-                .bind(&[s("api")])?
-                .first(Some("name"))
+            let rows: Vec<Value> = env
+                .database("DB")?
+                .query("SELECT name FROM targets WHERE slug = $1", &[json!("api")])
                 .await?;
+            let name = rows
+                .first()
+                .and_then(|row| row["name"].as_str())
+                .unwrap_or("none");
 
-            Response::ok(name.unwrap_or_else(|| "none".to_string()))
+            Response::ok(name)
         }
         "/kv" => {
-            let store = env.kv("CACHE")?;
+            let kv = env.kv("CACHE")?;
 
-            store.put("greeting", "hello")?.execute().await?;
+            kv.put("greeting", "hello", None).await?;
 
-            let value = store.get("greeting").text().await?;
+            let value: Option<String> = kv.get("greeting").await?;
 
             Response::ok(value.unwrap_or_default())
         }
-        "/r2" => {
-            let bucket = env.bucket("PHOTOS")?;
+        "/storage" => {
+            let storage = env.storage("PHOTOS")?;
 
-            bucket
-                .put("logo.png", b"png bytes".to_vec())
-                .execute()
+            storage.put("logo.png", b"png bytes".to_vec()).await?;
+
+            match storage.get("logo.png").await? {
+                Some(body) => Response::from_bytes(body),
+                None => Response::error("missing", 404),
+            }
+        }
+        "/kv-list" => {
+            let kv = env.kv("CACHE")?;
+
+            kv.put("greeting", "hello", Some(60)).await?;
+            kv.put("farewell", "bye", None).await?;
+            kv.delete("farewell").await?;
+
+            Response::ok(kv.list(Some("gr"), Some(10)).await?.join(","))
+        }
+        "/storage-head" => {
+            let storage = env.storage("PHOTOS")?;
+
+            storage.put("logo.png", b"png bytes".to_vec()).await?;
+
+            let head = storage.head("logo.png").await?;
+            let listing = storage.list(None, Some(10)).await?;
+
+            Response::ok(format!(
+                "{} {} {} {}",
+                head.size,
+                head.etag.unwrap_or_default(),
+                listing.keys.join(","),
+                listing.truncated
+            ))
+        }
+        "/any" => {
+            let targets: Vec<Target> = env
+                .database("DB")?
+                .query(
+                    "SELECT slug, name, url, expects FROM targets WHERE slug = ANY($1)",
+                    &[json!(["api", "web"])],
+                )
                 .await?;
 
-            let object = bucket.get("logo.png").execute().await?;
-            let Some(object) = object else {
-                return Response::error("missing", 404);
-            };
-            let Some(body) = object.body() else {
-                return Response::error("no body", 500);
-            };
-
-            Response::from_bytes(body.bytes().await?)
+            Response::ok(format!("{}", targets.len()))
         }
         "/email" => {
             let binding = env.send_email("EMAIL")?;
@@ -137,31 +146,23 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 /// One sweep per cron tick, as a status page would run it.
 #[event(scheduled)]
-async fn tick(event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+async fn tick(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     console_error_panic_hook::set_once();
 
-    if let Err(e) = install(&env) {
-        console_log!("cron {}: {e}", event.schedule());
-        return;
-    }
+    let database = match env.database("DB") {
+        Ok(database) => database,
+        Err(e) => return console_log!("cron: {e}"),
+    };
 
-    let pruned = db()
-        .prepare("DELETE FROM checks WHERE at < datetime('now', ?1)")
-        .bind(&[s("-30 days")]);
+    let pruned: Result<Vec<Value>> = database
+        .query(
+            "DELETE FROM checks WHERE at < now() - $1::interval RETURNING slug",
+            &[json!("30 days")],
+        )
+        .await;
 
     match pruned {
-        Err(e) => console_log!("cron: {e}"),
-        Ok(statement) => match statement.run().await {
-            Ok(result) => console_log!(
-                "cron: pruned {}",
-                result
-                    .meta()
-                    .ok()
-                    .flatten()
-                    .and_then(|meta| meta.changes)
-                    .unwrap_or(0)
-            ),
-            Err(e) => console_log!("cron: prune failed: {e}"),
-        },
+        Ok(rows) => console_log!("cron: pruned {}", rows.len()),
+        Err(e) => console_log!("cron: prune failed: {e}"),
     }
 }

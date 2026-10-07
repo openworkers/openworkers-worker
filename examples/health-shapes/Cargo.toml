@@ -7,10 +7,10 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
-# The rename a workers-rs application makes to move over
 [dependencies]
-worker = { package = "openworkers-worker", path = "../..", features = ["d1"] }
+worker = { package = "openworkers-worker", path = "../.." }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.release]
 opt-level = "s"

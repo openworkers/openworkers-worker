@@ -1,7 +1,7 @@
 //! Stand-ins for the two JavaScript crates workers-rs re-exports.
 //!
 //! A workers-rs application reaches through `worker::wasm_bindgen::JsValue`
-//! to bind D1 parameters and through `worker::js_sys::Date` for the clock.
+//! for a JavaScript value and through `worker::js_sys::Date` for the clock.
 //! There is no JavaScript here, so `JsValue` is a plain tagged value and
 //! `Date` reads `wasi:clocks/wall-clock`. Everything else those crates
 //! offer is absent.

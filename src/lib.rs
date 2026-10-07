@@ -4,7 +4,7 @@
 //! A workers-rs application moves over by renaming the dependency:
 //!
 //! ```toml
-//! worker = { package = "openworkers-worker", version = "0.1", features = ["d1"] }
+//! worker = { package = "openworkers-worker", version = "0.2" }
 //! ```
 //!
 //! The same `use worker::*`, the same `#[event(fetch)]`, the same
@@ -82,6 +82,7 @@ pub mod wit_v3 {
 mod console;
 
 mod context;
+mod database;
 mod date;
 mod email;
 mod env;
@@ -91,6 +92,7 @@ mod glue;
 mod headers;
 mod http_body;
 mod jsvalue;
+mod kv;
 mod method;
 mod request;
 mod request_init;
@@ -99,16 +101,12 @@ mod rt;
 #[cfg(feature = "p3")]
 mod rt_v3;
 mod schedule;
+mod storage;
 mod streams;
 mod task;
 
-pub mod kv;
 pub mod panic_hook;
-pub mod r2;
 pub mod send;
-
-#[cfg(feature = "d1")]
-pub mod d1;
 
 pub use openworkers_worker_macros::consume;
 pub use openworkers_worker_macros::durable_object;
@@ -118,8 +116,7 @@ pub use openworkers_worker_macros::send;
 pub use url::Url;
 
 pub use crate::context::Context;
-#[cfg(feature = "d1")]
-pub use crate::d1::*;
+pub use crate::database::BindingDatabase;
 pub use crate::date::Date;
 pub use crate::date::DateInit;
 pub use crate::email::*;
@@ -136,10 +133,8 @@ pub use crate::headers::Headers;
 pub use crate::jsvalue::js_sys;
 pub use crate::jsvalue::wasm_bindgen;
 pub use crate::jsvalue::wasm_bindgen_futures;
-pub use crate::kv::KvError;
-pub use crate::kv::KvStore;
+pub use crate::kv::BindingKv;
 pub use crate::method::Method;
-pub use crate::r2::*;
 pub use crate::request::Cf;
 pub use crate::request::FromRequest;
 pub use crate::request::Request;
@@ -154,6 +149,9 @@ pub use crate::response::ResponseBody;
 pub use crate::response::ResponseBuilder;
 pub use crate::schedule::ScheduleContext;
 pub use crate::schedule::ScheduledEvent;
+pub use crate::storage::BindingStorage;
+pub use crate::storage::StorageHeadResult;
+pub use crate::storage::StorageListResult;
 pub use crate::streams::ByteStream;
 pub use crate::task::TaskContext;
 pub use crate::task::TaskEvent;

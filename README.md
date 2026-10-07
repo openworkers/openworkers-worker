@@ -1,23 +1,20 @@
 # openworkers-worker
 
-A guest SDK for OpenWorkers, source-compatible with Cloudflare's
-[`worker`](https://crates.io/crates/worker) crate 0.8.
-
-An existing workers-rs application moves over by renaming one dependency:
+A guest SDK for OpenWorkers. Requests, responses and handlers follow
+Cloudflare's [`worker`](https://crates.io/crates/worker) crate 0.8; the
+bindings follow OpenWorkers' JavaScript runtime.
 
 ```toml
-# before
-worker = { version = "0.8", features = ["d1"] }
-
-# after
-worker = { package = "openworkers-worker", version = "0.1", features = ["d1"] }
+worker = { package = "openworkers-worker", version = "0.2" }
 ```
 
 The same `use worker::*`, the same `#[event(fetch)]` and `#[event(scheduled)]`,
-the same `Request`/`Response`/`Headers`/`Env`/`D1Database`. Underneath there is
-no JavaScript, no wasm-bindgen and no V8: the crate targets `wasm32-wasip2` and
-speaks `wasi:http/proxy@0.2.0` plus `openworkers:bindings@0.1.0` to a wasmtime
-host.
+the same `Request`/`Response`/`Headers`/`Env` as workers-rs. The bindings are
+the ones a JavaScript worker sees on `env`: `env.database("DB")` is `env.DB`,
+with its `query`, and the same holds for `kv` and `storage`. Underneath there
+is no JavaScript, no wasm-bindgen and no V8: the crate targets `wasm32-wasip2`
+and speaks `wasi:http/proxy@0.2.0` plus `openworkers:bindings@0.1.0` to a
+wasmtime host.
 
 ```
 cargo build --target wasm32-wasip2 --release
@@ -33,8 +30,10 @@ use worker::*;
 
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
-    let db = env.d1("DB")?;
-    let rows: Vec<Row> = db.prepare("SELECT * FROM targets").all().await?.results()?;
+    let rows: Vec<Row> = env
+        .database("DB")?
+        .query("SELECT * FROM targets WHERE active = $1", &[json!(true)])
+        .await?;
 
     Response::from_json(&rows)
 }
@@ -72,10 +71,21 @@ emits the task export. A cron tick reaches a task handler with
 
 ## Migrating a workers-rs application
 
-Renaming the dependency is the whole SDK change. What else has to go is
-anything that talks to JavaScript directly, because wasm-bindgen's imports
-have no host on `wasm32-wasip2` and panic with *"cannot call wasm-bindgen
-imported functions on non-wasm targets"* the first time they run:
+Rename the dependency, then move the bindings to the OpenWorkers ones:
+
+- D1 becomes `env.database("DB")?.query(sql, params)`, and its SQL becomes
+  PostgreSQL: `$1` placeholders, `now() - $1::interval` for
+  `datetime('now', ?1)`. A statement that has to report what it changed
+  says `RETURNING`.
+- `env.kv("KV")` keeps its name; `get`, `put`, `delete` and `list` take their
+  arguments directly instead of through builders.
+- R2 becomes `env.storage("STORAGE")`, with `get`, `put`, `head`, `list` and
+  `delete`.
+
+What else has to go is anything that talks to JavaScript directly, because
+wasm-bindgen's imports have no host on `wasm32-wasip2` and panic with
+*"cannot call wasm-bindgen imported functions on non-wasm targets"* the first
+time they run:
 
 1. Drop the `console_error_panic_hook` dependency and add
    `use worker::console_error_panic_hook;`. The call site stays as it is.
@@ -84,12 +94,8 @@ imported functions on non-wasm targets"* the first time they run:
 3. Drop `wasmbind` from `chrono`'s features, and `wasm-bindgen` from `time`'s.
    Both read the clock through `std` once the feature is off.
 4. Replace any other `js_sys` / `wasm_bindgen` use. `worker::js_sys::Date` and
-   `worker::wasm_bindgen::JsValue` cover what a D1 or clock call site needs;
+   `worker::wasm_bindgen::JsValue` cover what a clock call site needs;
    `Reflect`, `Promise`, `Uint8Array` and the rest have no counterpart.
-
-A real workers-rs status page (fetch handler, cron handler, two D1 bindings,
-`send_email`, `Fetch` webhooks, a router rendering HTML) needed exactly those
-four edits and then served its pages and ran its cron unchanged.
 
 ## What is implemented
 
@@ -102,9 +108,10 @@ four edits and then served its pages and ran its cron unchanged.
 | `Env`, `Var`, `Secret` (from `wasi:cli/environment`) | yes |
 | `Fetch` (outbound HTTP) | yes, through `wasi:http/outgoing-handler` |
 | `console_log!` and friends, panic hook | yes, to stdout and stderr |
-| D1 (`d1` feature): `prepare`/`bind`/`first`/`all`/`run`/`exec`/`batch`, `query!` | yes |
-| KV: `get`/`put`/`delete`/`list` | yes |
-| R2: `get`/`put`/`delete`/`head`/`list` | yes |
+| `env.database`: `query`, PostgreSQL | yes |
+| `env.kv`: `get`/`put`/`delete`/`list`, JSON values | yes |
+| `env.storage`: `get`/`put`/`head`/`list`/`delete` | yes; no `fetch`, the host has no such call |
+| D1, R2, Cloudflare's KV builders | absent; see the bindings above |
 | `send_email` | types only; every send reports that the platform has no email operation |
 | Queues, Durable Objects, WebSockets, Cache, Images | absent |
 
@@ -116,11 +123,9 @@ four edits and then served its pages and ran its cron unchanged.
 - **`ScheduledEvent::cron()` is empty on runtime-wasm before 0.15.3.** Those
   hosts call the scheduled export, which carries only the trigger time.
 - **`req.cf()` is always `None`.** There is no Cloudflare edge metadata.
-- **`Bucket::head` errors on a missing key** rather than returning `Ok(None)`:
+- **`storage.head` errors on a missing key** rather than returning `Ok(None)`:
   the host's `head` cannot separate absence from failure. Use `get` when the
   two have to be told apart.
-- **KV stores JSON documents.** A plain string is stored quoted and unquoted on
-  the way back; `put_bytes` stores a JSON array of bytes.
 - **`worker::wasm_bindgen::JsValue` is a plain tagged value**, not a JS handle.
   `from_str`, `from_f64`, `from_bool`, `NULL` and the `From` impls work; the
   rest of wasm-bindgen does not exist.

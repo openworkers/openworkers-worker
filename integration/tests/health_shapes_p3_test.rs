@@ -1,6 +1,6 @@
 //! The health-shapes example built for the WASI 0.3 world: the platform
-//! bindings keep their sync ABI inside the async world, so the same d1, kv
-//! and r2 round trips must come out unchanged.
+//! bindings keep their sync ABI inside the async world, so the same database,
+//! kv and storage round trips must come out unchanged.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -63,7 +63,7 @@ impl OperationsHandler for BindingOps {
             .unwrap()
             .push((binding.to_string(), sql.clone(), params));
 
-        let json = match sql.starts_with("SELECT") {
+        let json = match sql.starts_with("SELECT") || sql.contains("RETURNING") {
             true => r#"[{"slug":"api","name":"API","url":"https://api.test","expects":200}]"#,
             false => r#"{"rowsAffected":3}"#,
         };
@@ -156,7 +156,7 @@ fn body_text(response: &HttpResponse) -> String {
 }
 
 #[tokio::test]
-async fn p3_d1_all_and_results_deserialize_rows() {
+async fn p3_database_query_deserializes_rows() {
     let (response, ops) = serve("/targets").await;
 
     assert_eq!(response.status, 200);
@@ -179,8 +179,8 @@ async fn p3_kv_round_trips_a_string() {
 }
 
 #[tokio::test]
-async fn p3_r2_round_trips_bytes() {
-    let (response, _) = serve("/r2").await;
+async fn p3_storage_round_trips_bytes() {
+    let (response, _) = serve("/storage").await;
 
     assert_eq!(response.status, 200);
     assert_eq!(body_text(&response), "png bytes");

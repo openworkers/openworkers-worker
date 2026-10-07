@@ -63,7 +63,7 @@ impl OperationsHandler for BindingOps {
             .unwrap()
             .push((binding.to_string(), sql.clone(), params));
 
-        let json = match sql.starts_with("SELECT") {
+        let json = match sql.starts_with("SELECT") || sql.contains("RETURNING") {
             true => r#"[{"slug":"api","name":"API","url":"https://api.test","expects":200}]"#,
             false => r#"{"rowsAffected":3}"#,
         };
@@ -161,7 +161,7 @@ fn body_text(response: &HttpResponse) -> String {
 }
 
 #[tokio::test]
-async fn d1_all_and_results_deserialize_rows() {
+async fn database_query_deserializes_rows() {
     let (response, ops) = serve("/targets").await;
 
     assert_eq!(response.status, 200);
@@ -178,11 +178,11 @@ async fn d1_all_and_results_deserialize_rows() {
 }
 
 #[tokio::test]
-async fn d1_bind_sends_typed_parameters() {
+async fn database_query_sends_typed_parameters() {
     let (response, ops) = serve("/record").await;
 
     assert_eq!(response.status, 200);
-    assert_eq!(body_text(&response), "recorded 3");
+    assert_eq!(body_text(&response), "recorded 1");
 
     let queries = ops.queries.lock().unwrap();
     let (_, sql, params) = &queries[0];
@@ -196,7 +196,7 @@ async fn d1_bind_sends_typed_parameters() {
 }
 
 #[tokio::test]
-async fn d1_first_picks_one_column() {
+async fn database_query_reads_one_column() {
     let (response, _) = serve("/first").await;
 
     assert_eq!(response.status, 200);
@@ -212,11 +212,44 @@ async fn kv_round_trips_a_string() {
 }
 
 #[tokio::test]
-async fn r2_round_trips_bytes() {
-    let (response, _) = serve("/r2").await;
+async fn storage_round_trips_bytes() {
+    let (response, _) = serve("/storage").await;
 
     assert_eq!(response.status, 200);
     assert_eq!(body_text(&response), "png bytes");
+}
+
+#[tokio::test]
+async fn kv_lists_what_delete_left() {
+    let (response, _) = serve("/kv-list").await;
+
+    assert_eq!(response.status, 200);
+    assert_eq!(body_text(&response), "greeting");
+}
+
+#[tokio::test]
+async fn storage_head_and_list_report_the_object() {
+    let (response, _) = serve("/storage-head").await;
+
+    assert_eq!(response.status, 200);
+    assert_eq!(body_text(&response), "9 mock-etag logo.png false");
+}
+
+#[tokio::test]
+async fn database_query_binds_an_array_as_a_list() {
+    let (response, ops) = serve("/any").await;
+
+    assert_eq!(response.status, 200);
+    assert_eq!(body_text(&response), "1");
+
+    let queries = ops.queries.lock().unwrap();
+    let (_, _, params) = &queries[0];
+
+    assert_eq!(params.len(), 1);
+    assert!(
+        matches!(&params[0], SqlParam::Array(values) if values.len() == 2),
+        "an array should bind as one list parameter: {params:?}"
+    );
 }
 
 #[tokio::test]
@@ -251,7 +284,7 @@ async fn scheduled_handler_runs_a_statement() {
             .lock()
             .unwrap()
             .iter()
-            .any(|line| line.contains("pruned 3")),
+            .any(|line| line.contains("pruned 1")),
         "cron log missing: {:?}",
         ops.logs.lock().unwrap()
     );

@@ -17,8 +17,6 @@ pub enum Error {
     SerdeJsonError(serde_json::Error),
     StatusCode(http::status::InvalidStatusCode),
     Utf8Error(std::str::Utf8Error),
-    #[cfg(feature = "d1")]
-    D1(crate::d1::D1Error),
 }
 
 impl Display for Error {
@@ -34,8 +32,6 @@ impl Display for Error {
             Error::SerdeJsonError(e) => write!(f, "{e}"),
             Error::StatusCode(e) => write!(f, "{e}"),
             Error::Utf8Error(e) => write!(f, "{e}"),
-            #[cfg(feature = "d1")]
-            Error::D1(e) => write!(f, "{e}"),
         }
     }
 }

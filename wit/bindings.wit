@@ -1,8 +1,8 @@
 // Braces because wit/ already holds openworkers:worker; a directory takes at
 // most one unbraced package
 package openworkers:bindings@0.1.0 {
-    /// SQL access, shaped after D1. A statement is prepared and its positional
-    /// parameters bound guest-side; the host is only called to run it.
+    /// SQL access to PostgreSQL. A statement's positional parameters are bound
+    /// guest-side; the host is only called to run it.
     interface database {
         /// A JSON document, as text
         type json = string;
@@ -44,8 +44,7 @@ package openworkers:bindings@0.1.0 {
         /// Run a statement and return every row it produced
         all: func(binding: string, sql: string, params: list<sql-param>) -> result<query-result, string>;
 
-        /// Run a statement and keep only its meta; D1's `exec` is this with no
-        /// parameters, so it needs no separate function
+        /// Run a statement and keep only its meta
         run: func(binding: string, sql: string, params: list<sql-param>) -> result<query-meta, string>;
     }
 
@@ -69,7 +68,7 @@ package openworkers:bindings@0.1.0 {
         list-keys: func(binding: string, prefix: option<string>, limit: option<u32>) -> result<list<string>, string>;
     }
 
-    /// Object storage, shaped after R2: opaque byte bodies addressed by key.
+    /// Object storage: opaque byte bodies addressed by key.
     interface storage {
         /// Object metadata, as reported by head
         record object-info {
