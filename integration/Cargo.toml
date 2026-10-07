@@ -8,7 +8,7 @@ license = "MIT"
 
 [dev-dependencies]
 openworkers-runtime-wasm = { path = "../../openworkers-runtime-wasm" }
-openworkers-core = { git = "https://github.com/openworkers/openworkers-core", tag = "v0.14.0", features = [
+openworkers-core = { git = "https://github.com/openworkers/openworkers-core", tag = "v0.15.0", features = [
     "wasm",
 ] }
 bytes = "1"
