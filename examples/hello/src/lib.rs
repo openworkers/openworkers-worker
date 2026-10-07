@@ -88,5 +88,5 @@ async fn fetch(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
 #[event(scheduled)]
 async fn tick(event: ScheduledEvent, _env: Env, _ctx: ScheduleContext) {
     console_error_panic_hook::set_once();
-    console_log!("scheduled at {}", event.schedule());
+    console_log!("scheduled at {} by '{}'", event.schedule(), event.cron());
 }

@@ -46,8 +46,29 @@ async fn tick(event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
 ```
 
 A worker with only a fetch handler exports `wasi:http/incoming-handler` alone;
-adding `#[event(scheduled)]` adds `openworkers:worker/scheduled`, which is how
-the host tells a cron-capable worker from one that only serves HTTP.
+adding `#[event(scheduled)]` adds `openworkers:worker/scheduled` and
+`openworkers:worker/task`, which is how the host tells a cron-capable worker
+from one that only serves HTTP. A host that has the task export calls it and
+sends the cron expression; an older host calls `scheduled` with the time alone.
+
+## Tasks
+
+`#[event(task)]` is OpenWorkers' own: it gets every task the platform runs,
+cron, chained, sent from a worker or invoked, with its payload. What it returns
+is the task result, as JSON; an error fails the task.
+
+```rust
+#[event(task)]
+async fn task(event: TaskEvent, _env: Env, _ctx: TaskContext) -> Result<Option<u32>> {
+    let order: Option<Order> = event.payload()?;
+
+    Ok(order.map(|order| order.quantity * 2))
+}
+```
+
+A worker has `#[event(task)]` or `#[event(scheduled)]`, not both: each one
+emits the task export. A cron tick reaches a task handler with
+`TaskSource::Schedule { time, cron }`.
 
 ## Migrating a workers-rs application
 
@@ -75,6 +96,7 @@ four edits and then served its pages and ran its cron unchanged.
 | Area | Status |
 |---|---|
 | `#[event(fetch)]`, `#[event(scheduled)]` | yes, `respond_with_errors` included |
+| `#[event(task)]`: payload, source, attempt, JSON result | yes, OpenWorkers only |
 | `Request`, `Response`, `ResponseBuilder`, `Headers`, `Method`, `Url` | yes |
 | `http::Request`/`http::Response` conversions, `Body` | yes |
 | `Env`, `Var`, `Secret` (from `wasi:cli/environment`) | yes |
@@ -91,8 +113,8 @@ four edits and then served its pages and ran its cron unchanged.
 - **Bodies are buffered.** The host buffers request and response bodies at the
   boundary, so `Response::from_stream` collects and `ResponseBody` has no
   stream variant.
-- **`ScheduledEvent::cron()` is empty.** The host's scheduled export carries
-  only the trigger time.
+- **`ScheduledEvent::cron()` is empty on runtime-wasm before 0.15.3.** Those
+  hosts call the scheduled export, which carries only the trigger time.
 - **`req.cf()` is always `None`.** There is no Cloudflare edge metadata.
 - **`Bucket::head` errors on a missing key** rather than returning `Ok(None)`:
   the host's `head` cannot separate absence from failure. Use `get` when the
@@ -120,11 +142,12 @@ same loop drains before the export returns.
 
 - `.` - the SDK
 - `wit/` - verbatim copy of the runtime's contract; the SDK generates against
-  its `fetch-worker` and `scheduled-only` worlds
+  its `fetch-worker`, `scheduled-only` and `task-only` worlds
 - `macros/` - `#[event]` and friends
 - `integration/` - runs the examples through `openworkers-runtime-wasm`
 - `examples/hello` - the smallest worker
 - `examples/health-shapes` - the shapes a real status page uses
+- `examples/task` - a task handler that answers what it received
 
 ```
 cd examples/hello && cargo build --target wasm32-wasip2 --release

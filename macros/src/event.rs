@@ -13,6 +13,7 @@ use syn::ItemFn;
 enum HandlerType {
     Fetch,
     Scheduled,
+    Task,
 }
 
 /// The path the SDK is reachable under from the caller's crate. A workers-rs
@@ -67,12 +68,13 @@ pub fn expand_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
             "respond_with_errors" => respond_with_errors = true,
             "fetch" => handler_type = Some(HandlerType::Fetch),
             "scheduled" => handler_type = Some(HandlerType::Scheduled),
+            "task" => handler_type = Some(HandlerType::Task),
             other => {
                 return err(
                     attr.span(),
                     format!(
                         "`{other}` events are not supported by openworkers-worker; \
-                         use `fetch` or `scheduled`"
+                         use `fetch`, `scheduled` or `task`"
                     ),
                 )
             }
@@ -82,7 +84,7 @@ pub fn expand_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     let Some(handler_type) = handler_type else {
         return err(
             Span::call_site(),
-            "must have either the 'fetch' or 'scheduled' attribute, e.g. #[event(fetch)]"
+            "must have the 'fetch', 'scheduled' or 'task' attribute, e.g. #[event(fetch)]"
                 .to_string(),
         );
     };
@@ -133,11 +135,52 @@ pub fn expand_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                     for #component
                 {
                     fn handle_scheduled(scheduled_time: u64) {
-                        #krate::__private::serve_scheduled(scheduled_time, #fn_ident)
+                        #krate::__private::serve_scheduled(scheduled_time, ::std::string::String::new(), #fn_ident)
+                    }
+                }
+
+                // A host that has the task export calls it in place of
+                // scheduled, and sends the cron expression through it
+                impl #krate::wit_task::exports::openworkers::worker::task::Guest
+                    for #component
+                {
+                    fn handle_task(
+                        event: #krate::wit_task::exports::openworkers::worker::task::TaskEvent,
+                    ) -> ::std::result::Result<::std::option::Option<::std::string::String>, ::std::string::String> {
+                        #krate::__private::serve_scheduled_task(event, #fn_ident)
                     }
                 }
 
                 #krate::wit_scheduled::__export_worker_scheduled!(#component with_types_in #krate::wit_scheduled);
+                #krate::wit_task::__export_worker_task!(#component with_types_in #krate::wit_task);
+            }
+            .into()
+        }
+        HandlerType::Task => {
+            if let Err(e) = validate(&input_fn, "task") {
+                return e;
+            }
+
+            let component = Ident::new(&format!("__OpenWorkersTask_{fn_ident}"), fn_ident.span());
+
+            quote! {
+                #input_fn
+
+                #[doc(hidden)]
+                #[allow(non_camel_case_types)]
+                struct #component;
+
+                impl #krate::wit_task::exports::openworkers::worker::task::Guest
+                    for #component
+                {
+                    fn handle_task(
+                        event: #krate::wit_task::exports::openworkers::worker::task::TaskEvent,
+                    ) -> ::std::result::Result<::std::option::Option<::std::string::String>, ::std::string::String> {
+                        #krate::__private::serve_task(event, #fn_ident)
+                    }
+                }
+
+                #krate::wit_task::__export_worker_task!(#component with_types_in #krate::wit_task);
             }
             .into()
         }

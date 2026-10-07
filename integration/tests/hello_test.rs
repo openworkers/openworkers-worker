@@ -217,6 +217,32 @@ async fn scheduled_handler_runs() {
 }
 
 #[tokio::test]
+async fn scheduled_handler_gets_the_cron() {
+    let ops = MockOps::new();
+    let mut worker = WasmWorker::new_with_ops(script("hello", None), None, ops.clone())
+        .await
+        .expect("worker");
+
+    let source = openworkers_core::TaskSource::Schedule {
+        time: 1_234_567_890,
+        cron: Some("*/5 * * * *".to_string()),
+    };
+    let (event, rx) = Event::task("cron-task".to_string(), None, Some(source), 1);
+    worker.exec(event).await.expect("exec");
+
+    assert!(rx.await.expect("task result").success);
+    assert!(
+        ops.logs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, message)| message.contains("scheduled at 1234567890 by '*/5 * * * *'")),
+        "cron log missing: {:?}",
+        ops.logs.lock().unwrap()
+    );
+}
+
+#[tokio::test]
 async fn a_oneshot_bridge_resumes_the_handler() {
     let mut worker = WasmWorker::new(script("hello", None), None, None)
         .await

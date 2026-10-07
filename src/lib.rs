@@ -49,6 +49,20 @@ pub mod wit_scheduled {
     });
 }
 
+/// The task export, generated on its own like the cron one: only a worker
+/// with `#[event(task)]` or `#[event(scheduled)]` carries it.
+#[doc(hidden)]
+pub mod wit_task {
+    wit_bindgen::generate!({
+        world: "task-only",
+        path: "wit",
+        generate_all,
+        pub_export_macro: true,
+        export_macro_name: "__export_worker_task",
+        default_bindings_module: "openworkers_worker::wit_task",
+    });
+}
+
 /// Bindings for the WASI 0.3 world. The wit declares `handle` as an async
 /// func, so wit-bindgen emits async bindings without further options.
 #[cfg(feature = "p3")]
@@ -86,6 +100,7 @@ mod rt;
 mod rt_v3;
 mod schedule;
 mod streams;
+mod task;
 
 pub mod kv;
 pub mod panic_hook;
@@ -140,6 +155,9 @@ pub use crate::response::ResponseBuilder;
 pub use crate::schedule::ScheduleContext;
 pub use crate::schedule::ScheduledEvent;
 pub use crate::streams::ByteStream;
+pub use crate::task::TaskContext;
+pub use crate::task::TaskEvent;
+pub use crate::task::TaskSource;
 
 /// The panic hook module workers-rs users reach for. Ours writes to stderr,
 /// which the host forwards as an error log.
@@ -178,6 +196,8 @@ pub mod __private {
     #[cfg(feature = "p3")]
     pub use crate::glue::serve_fetch_v3;
     pub use crate::glue::serve_scheduled;
+    pub use crate::glue::serve_scheduled_task;
+    pub use crate::glue::serve_task;
 }
 
 /// What `#[event(fetch)]` expands through: the same macro name emits the

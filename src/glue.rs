@@ -25,6 +25,7 @@ use crate::wit::wasi::http0_2_0::types::OutgoingResponse;
 use crate::wit::wasi::http0_2_0::types::ResponseOutparam;
 #[cfg(not(feature = "p3"))]
 use crate::wit::wasi::http0_2_0::types::Scheme;
+use crate::wit_task::exports::openworkers::worker::task as wit_task;
 #[cfg(not(feature = "p3"))]
 use crate::Context;
 use crate::Env;
@@ -39,6 +40,9 @@ use crate::Response;
 use crate::Result;
 use crate::ScheduleContext;
 use crate::ScheduledEvent;
+use crate::TaskContext;
+use crate::TaskEvent;
+use serde::Serialize;
 
 /// Drives a `#[event(fetch)]` handler for one request.
 #[cfg(not(feature = "p3"))]
@@ -67,7 +71,7 @@ pub fn serve_fetch<Req, Fut, Res, Err, F>(
 }
 
 /// Drives a `#[event(scheduled)]` handler for one cron tick.
-pub fn serve_scheduled<Fut, F>(scheduled_time: u64, handler: F)
+pub fn serve_scheduled<Fut, F>(scheduled_time: u64, cron: String, handler: F)
 where
     F: FnOnce(ScheduledEvent, Env, ScheduleContext) -> Fut,
     Fut: Future<Output = ()>,
@@ -75,12 +79,62 @@ where
     crate::panic_hook::set_once();
 
     rt::block_on(handler(
-        ScheduledEvent::new(scheduled_time),
+        ScheduledEvent::new(scheduled_time, cron),
         Env,
         ScheduleContext,
     ));
 
     rt::drain_tasks();
+}
+
+/// Drives a `#[event(scheduled)]` handler from the task export, which carries
+/// the cron expression. A task that no schedule started runs the handler at
+/// time 0, as the scheduled export did.
+pub fn serve_scheduled_task<Fut, F>(
+    event: wit_task::TaskEvent,
+    handler: F,
+) -> std::result::Result<Option<String>, String>
+where
+    F: FnOnce(ScheduledEvent, Env, ScheduleContext) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let (time, cron) = match event.source {
+        Some(wit_task::TaskSource::Schedule(schedule)) => {
+            (schedule.time, schedule.cron.unwrap_or_default())
+        }
+        _ => (0, String::new()),
+    };
+
+    serve_scheduled(time, cron, handler);
+
+    Ok(None)
+}
+
+/// Drives a `#[event(task)]` handler. Its value goes back as JSON text; a
+/// value that serialises to null, `()` included, goes back as no data.
+pub fn serve_task<Fut, F, T>(
+    event: wit_task::TaskEvent,
+    handler: F,
+) -> std::result::Result<Option<String>, String>
+where
+    F: FnOnce(TaskEvent, Env, TaskContext) -> Fut,
+    Fut: Future<Output = Result<T>>,
+    T: Serialize,
+{
+    crate::panic_hook::set_once();
+
+    let event = TaskEvent::from_wit(event).map_err(|e| e.to_string())?;
+    let result = rt::block_on(handler(event, Env, ScheduleContext));
+
+    rt::drain_tasks();
+
+    let value = result.map_err(|e| e.to_string())?;
+
+    match serde_json::to_value(&value) {
+        Ok(serde_json::Value::Null) => Ok(None),
+        Ok(value) => Ok(Some(value.to_string())),
+        Err(e) => Err(format!("the task result does not serialise to JSON: {e}")),
+    }
 }
 
 #[cfg(not(feature = "p3"))]

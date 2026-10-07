@@ -6,6 +6,40 @@ interface scheduled {
     handle-scheduled: func(scheduled-time: u64);
 }
 
+/// Every task the platform runs: cron, chained, sent from a worker or
+/// invoked. A host calls it in place of `scheduled` when a guest exports both.
+interface task {
+    record schedule {
+        /// Unix timestamp in ms
+        time: u64,
+        /// The cron expression that fired, when the scheduler sends one
+        cron: option<string>,
+    }
+
+    variant task-source {
+        schedule(schedule),
+        /// The id of the parent task
+        chained(string),
+        /// The id of the worker that created the task
+        worker(string),
+        /// Where the invocation came from: "cli", "dashboard", "api"
+        invoke(option<string>),
+    }
+
+    record task-event {
+        task-id: string,
+        /// 1 on the first run
+        attempt: u32,
+        /// JSON text
+        payload: option<string>,
+        source: option<task-source>,
+    }
+
+    /// ok carries the result data as JSON text; err fails the task with that
+    /// message
+    handle-task: func(event: task-event) -> result<option<string>, string>;
+}
+
 /// A guest that only serves HTTP: the standard wasi:http proxy, the
 /// environment its bindings are named in, and the platform bindings. Guests
 /// needing none of those can target wasi:http/proxy directly and run
@@ -45,6 +79,12 @@ world scheduled-only {
     export scheduled;
 }
 
+/// The task export on its own, added like `scheduled-only`: only by a guest
+/// that has a handler
+world task-only {
+    export task;
+}
+
 /// Full OpenWorkers guest: HTTP, cron and the platform bindings
 world worker {
     include fetch-worker;
@@ -57,4 +97,10 @@ world worker {
 world worker-host {
     include openworkers:bindings/imports@0.1.0;
     export scheduled;
+}
+
+/// Host-side view of the task export. A separate world, so a guest without it
+/// still binds `worker-host`.
+world task-host {
+    export task;
 }

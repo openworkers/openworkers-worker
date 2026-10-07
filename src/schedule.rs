@@ -1,8 +1,8 @@
 //! The cron event.
 //!
-//! `openworkers:worker/scheduled` carries only the trigger time, so
-//! [`ScheduledEvent::cron`] has nothing to report and returns an empty
-//! string.
+//! Through the `openworkers:worker/task` export the host sends the cron
+//! expression. A host that knows only `openworkers:worker/scheduled` sends the
+//! trigger time alone, and [`ScheduledEvent::cron`] is then empty.
 
 use crate::rt;
 
@@ -14,15 +14,15 @@ pub struct ScheduledEvent {
 }
 
 impl ScheduledEvent {
-    pub(crate) fn new(scheduled_time: u64) -> Self {
+    pub(crate) fn new(scheduled_time: u64, cron: String) -> Self {
         ScheduledEvent {
-            cron: String::new(),
+            cron,
             ty: "scheduled".to_string(),
             schedule: scheduled_time as f64,
         }
     }
 
-    /// The cron expression that fired. The host does not send one.
+    /// The cron expression that fired. Empty when the host sends none.
     pub fn cron(&self) -> String {
         self.cron.clone()
     }
